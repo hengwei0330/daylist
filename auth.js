@@ -1,189 +1,167 @@
 /* =========================================================
-   Daylist — demo accounts
+   Daylist — accounts, backed by Supabase Auth
    ---------------------------------------------------------
-   READ THIS BEFORE REUSING ANY OF IT.
+   This is real authentication. Signing up creates a row in
+   Supabase's auth.users table on their servers; signing in sends
+   the password to Supabase, which checks it against a hash we
+   never see and hands back a time-limited access token.
 
-   This file fakes a login system entirely inside the visitor's
-   own browser. There is no server, so:
-
-     * Anyone can open the browser's developer tools and read
-       every stored account.
-     * Anyone can edit those accounts, or just delete the check
-       that sends them to the login page.
-     * An account does not exist on any other browser, device,
-       or for any other visitor.
-
-   It is a classroom demonstration of what a login FLOW looks
-   like, not a way to protect anything. Real authentication has
-   to happen on a server the visitor cannot edit.
-
-   Passwords are salted and hashed with SHA-256 before being
-   stored, so the raw text is not sitting in plain sight. That
-   is good hygiene, not security: without a server, the check
-   itself can simply be bypassed.
+   The important difference from a browser-only fake: the check
+   happens somewhere the visitor cannot edit. Deleting JavaScript
+   in developer tools no longer gets anyone in, because the
+   database itself refuses to return rows without a valid token.
    ========================================================= */
 
 window.Auth = (function () {
   "use strict";
 
-  var ACCOUNTS_KEY = "daylist.accounts.v1";
-  var SESSION_KEY  = "daylist.session.v1";
-  var TASKS_PREFIX = "daylist.tasks.v1";   // per account: "<prefix>::<username>"
-  var LEGACY_TASKS = "daylist.tasks.v1";   // tasks saved before accounts existed
+  var client = null;
+  var clientTried = false;
 
-  /* ---------------- storage helpers ---------------- */
-  function readJSON(store, key){
+  /* ---------------- the Supabase client ---------------- */
+
+  function placeholder(value){
+    return !value || String(value).indexOf("PASTE_") === 0;
+  }
+
+  /* True once supabase-config.js has real values in it. */
+  function configured(){
+    var cfg = window.SUPABASE_CONFIG;
+    return !!(cfg && !placeholder(cfg.url) && !placeholder(cfg.anonKey));
+  }
+
+  function getClient(){
+    if (clientTried) return client;
+    clientTried = true;
+    if (!configured() || !window.supabase || !window.supabase.createClient) return null;
     try {
-      var raw = store.getItem(key);
-      return raw === null ? null : JSON.parse(raw);
-    } catch (e) { return null; }
-  }
-  function writeJSON(store, key, value){
-    try { store.setItem(key, JSON.stringify(value)); return true; }
-    catch (e) { return false; }
-  }
-  function drop(store, key){
-    try { store.removeItem(key); } catch (e) {}
-  }
-
-  function allAccounts(){ return readJSON(localStorage, ACCOUNTS_KEY) || {}; }
-  function saveAccounts(a){ return writeJSON(localStorage, ACCOUNTS_KEY, a); }
-
-  /* ---------------- password hashing ---------------- */
-  function toHex(bytes){
-    var out = "";
-    for (var i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, "0");
-    return out;
-  }
-
-  function makeSalt(){
-    var bytes = new Uint8Array(16);
-    if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(bytes);
-    else for (var i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
-    return toHex(bytes);
-  }
-
-  /* Fallback for the rare browser with no Web Crypto. Clearly weaker —
-     labelled so a stored hash always says which method produced it. */
-  function weakHash(str){
-    var h = 5381;
-    for (var i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
-    return "weak:" + (h >>> 0).toString(16);
-  }
-
-  function hashPassword(password, salt){
-    var input = salt + ":" + password;
-    if (window.crypto && window.crypto.subtle && window.TextEncoder){
-      return window.crypto.subtle
-        .digest("SHA-256", new TextEncoder().encode(input))
-        .then(function (buf){ return "sha256:" + toHex(new Uint8Array(buf)); })
-        .catch(function (){ return weakHash(input); });
+      client = window.supabase.createClient(
+        window.SUPABASE_CONFIG.url,
+        window.SUPABASE_CONFIG.anonKey
+      );
+    } catch (e) {
+      client = null;
     }
-    return Promise.resolve(weakHash(input));
+    return client;
   }
 
-  /* ---------------- validation ---------------- */
-  var NAME_RE = /^[A-Za-z0-9._-]{3,20}$/;
-
-  function checkName(name){
-    if (!name) return "Enter a username.";
-    if (!NAME_RE.test(name)) return "Usernames are 3–20 characters: letters, numbers, dot, dash or underscore.";
+  /* Why the app cannot run, in words worth showing on screen.
+     Returns null when everything it needs is present. */
+  function setupProblem(){
+    if (!window.supabase || !window.supabase.createClient){
+      return "The Supabase library did not load. Check your internet connection, then reload.";
+    }
+    if (!configured()){
+      return "Supabase is not configured yet. Open supabase-config.js and paste in your Project URL and public API key.";
+    }
+    if (!getClient()){
+      return "Could not start the Supabase client. Check that the values in supabase-config.js are correct.";
+    }
     return null;
   }
-  function checkPassword(pw){
-    if (!pw) return "Enter a password.";
-    if (pw.length < 8) return "Passwords need at least 8 characters.";
-    return null;
+
+  /* ---------------- error wording ----------------
+     Supabase's messages are accurate but terse. These say the same
+     thing in words that tell someone what to do next. */
+  function friendly(error){
+    if (!error) return "Something went wrong. Please try again.";
+    var m = String(error.message || "");
+
+    if (/invalid login credentials/i.test(m))
+      return "That email and password do not match an account.";
+    if (/email not confirmed/i.test(m))
+      return "This account still needs confirming — check your inbox for the confirmation link.";
+    if (/user already registered|already been registered/i.test(m))
+      return "There is already an account with that email. Try signing in instead.";
+    if (/password should be at least/i.test(m))
+      return "That password is too short. Use at least 6 characters.";
+    if (/unable to validate email|invalid email/i.test(m))
+      return "That does not look like a valid email address.";
+    if (/rate limit|too many requests/i.test(m))
+      return "Too many attempts just now. Wait a minute and try again.";
+    if (/failed to fetch|network/i.test(m))
+      return "Could not reach Supabase. Check your internet connection and the Project URL.";
+
+    return m || "Something went wrong. Please try again.";
   }
 
-  /* ---------------- accounts ---------------- */
-  function register(name, password, confirm){
-    name = (name || "").trim();
+  /* ---------------- sign up / in / out ---------------- */
 
-    var problem = checkName(name) || checkPassword(password);
+  /* Depending on the project's settings, a new signup either returns a
+     session straight away, or returns none and Supabase emails a
+     confirmation link. Both are normal, so say which one happened. */
+  function signUp(email, password){
+    var problem = setupProblem();
     if (problem) return Promise.resolve({ ok: false, error: problem });
-    if (password !== confirm) return Promise.resolve({ ok: false, error: "The two passwords do not match." });
 
-    var accounts = allAccounts();
-    var key = name.toLowerCase();
-    if (accounts[key]) return Promise.resolve({ ok: false, error: "That username is already taken." });
-
-    var firstEver = Object.keys(accounts).length === 0;
-    var salt = makeSalt();
-
-    return hashPassword(password, salt).then(function (hash){
-      accounts[key] = { display: name, salt: salt, hash: hash, createdAt: Date.now() };
-      if (!saveAccounts(accounts)){
-        return { ok: false, error: "This browser is blocking storage, so the account could not be saved." };
-      }
-      // The very first account adopts any tasks saved before logins existed,
-      // so nobody's earlier list disappears behind the new login screen.
-      if (firstEver) adoptLegacyTasks(key);
-      return { ok: true, user: name };
+    return getClient().auth.signUp({
+      email: String(email || "").trim(),
+      password: password || ""
+    }).then(function (res){
+      if (res.error) return { ok: false, error: friendly(res.error) };
+      if (res.data && res.data.session) return { ok: true, signedIn: true };
+      return { ok: true, signedIn: false };   // confirmation email sent
+    }, function (e){
+      return { ok: false, error: friendly(e) };
     });
   }
 
-  function login(name, password, remember){
-    name = (name || "").trim();
-    if (!name || !password) return Promise.resolve({ ok: false, error: "Enter your username and password." });
+  function signIn(email, password){
+    var problem = setupProblem();
+    if (problem) return Promise.resolve({ ok: false, error: problem });
 
-    var account = allAccounts()[name.toLowerCase()];
-    if (!account) return Promise.resolve({ ok: false, error: "No account with that username. Create one instead?" });
-
-    return hashPassword(password, account.salt).then(function (hash){
-      if (hash !== account.hash) return { ok: false, error: "That password does not match." };
-      startSession(account.display, remember);
-      return { ok: true, user: account.display };
+    return getClient().auth.signInWithPassword({
+      email: String(email || "").trim(),
+      password: password || ""
+    }).then(function (res){
+      if (res.error) return { ok: false, error: friendly(res.error) };
+      return { ok: true, signedIn: true };
+    }, function (e){
+      return { ok: false, error: friendly(e) };
     });
   }
 
-  function adoptLegacyTasks(accountKey){
-    var legacy = readJSON(localStorage, LEGACY_TASKS);
-    if (!legacy || !Array.isArray(legacy)) return;
-    if (writeJSON(localStorage, TASKS_PREFIX + "::" + accountKey, legacy)) drop(localStorage, LEGACY_TASKS);
+  function signOut(){
+    var c = getClient();
+    if (!c) return Promise.resolve();
+    return c.auth.signOut().catch(function (){ /* leaving anyway */ });
   }
 
-  /* ---------------- session ---------------- */
-  function startSession(display, remember){
-    var session = { user: display, at: Date.now() };
-    drop(localStorage, SESSION_KEY);
-    drop(sessionStorage, SESSION_KEY);
-    writeJSON(remember ? localStorage : sessionStorage, SESSION_KEY, session);
-  }
+  /* ---------------- reading the session ---------------- */
 
-  function currentUser(){
-    var s = readJSON(sessionStorage, SESSION_KEY) || readJSON(localStorage, SESSION_KEY);
-    if (!s || !s.user) return null;
-    // An account deleted out from under a stale session should not stay signed in.
-    return allAccounts()[s.user.toLowerCase()] ? s.user : null;
-  }
-
-  function logout(){
-    drop(localStorage, SESSION_KEY);
-    drop(sessionStorage, SESSION_KEY);
+  /* The Supabase client keeps the session in this browser and refreshes
+     it in the background, so this is a local read, not a round trip. */
+  function session(){
+    var c = getClient();
+    if (!c) return Promise.resolve(null);
+    return c.auth.getSession().then(function (res){
+      return (res && res.data && res.data.session) || null;
+    }, function (){ return null; });
   }
 
   /* Send anyone without a session to the login page.
-     Returns the username, or null when a redirect is under way. */
-  function requireUser(){
-    var user = currentUser();
-    if (!user) { window.location.replace("login.html"); return null; }
-    return user;
+     Resolves with the session, or null when a redirect is under way. */
+  function requireSession(){
+    return session().then(function (s){
+      if (!s) { window.location.replace("login.html"); return null; }
+      return s;
+    });
   }
 
-  function tasksKey(user){
-    return TASKS_PREFIX + "::" + String(user).toLowerCase();
+  function emailOf(session){
+    return (session && session.user && session.user.email) || "";
   }
-
-  function accountCount(){ return Object.keys(allAccounts()).length; }
 
   return {
-    register: register,
-    login: login,
-    logout: logout,
-    currentUser: currentUser,
-    requireUser: requireUser,
-    tasksKey: tasksKey,
-    accountCount: accountCount
+    configured: configured,
+    setupProblem: setupProblem,
+    client: getClient,
+    signUp: signUp,
+    signIn: signIn,
+    signOut: signOut,
+    session: session,
+    requireSession: requireSession,
+    emailOf: emailOf,
+    friendly: friendly
   };
 })();

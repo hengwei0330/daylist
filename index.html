@@ -11,7 +11,16 @@
 </head>
 <body>
 
-<div class="wrap">
+<!-- Shown while we ask Supabase whether this browser is signed in.
+     Replaced by the app, or by a setup message if something is missing. -->
+<div class="boot" id="boot">
+  <div class="boot-msg">
+    <span class="brand">Daylist<span class="dot">.</span></span>
+    <p>Checking your session…</p>
+  </div>
+</div>
+
+<div class="wrap" id="wrap" hidden>
   <header class="top">
     <div class="top-in">
       <span class="brand">Daylist<span class="dot">.</span></span>
@@ -52,11 +61,13 @@
   <div class="groups" id="groups"></div>
 
   <footer>
-    <span class="status"><span class="led"></span><span>Saved in this browser</span></span>
+    <span class="status"><span class="led"></span><span>Saved to your account</span></span>
     <span><kbd>/</kbd> to add · <kbd>Enter</kbd> to save · click a task to rename</span>
   </footer>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 </body>

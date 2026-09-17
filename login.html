@@ -16,88 +16,107 @@
     <span class="brand">Daylist<span class="dot">.</span></span>
     <p class="auth-sub" id="sub">Sign in to pick up your list.</p>
 
-    <div class="tabs" role="tablist">
-      <button class="tab" type="button" id="tab-signin" role="tab" aria-selected="true" aria-controls="form-signin">Sign in</button>
-      <button class="tab" type="button" id="tab-register" role="tab" aria-selected="false" aria-controls="form-register">Create account</button>
+    <!-- Shown only when supabase-config.js has not been filled in. -->
+    <div class="setup-warn" id="setup-warn" hidden></div>
+
+    <div id="panel">
+      <div class="tabs" role="tablist">
+        <button class="tab" type="button" id="tab-signin" role="tab" aria-selected="true" aria-controls="form-signin">Sign in</button>
+        <button class="tab" type="button" id="tab-register" role="tab" aria-selected="false" aria-controls="form-register">Create account</button>
+      </div>
+
+      <div class="err" id="error" hidden></div>
+
+      <!-- ---------- sign in ---------- -->
+      <form class="form" id="form-signin" role="tabpanel" aria-labelledby="tab-signin">
+        <label for="signin-email">
+          Email
+          <input id="signin-email" name="email" type="email" autocomplete="email"
+                 autocapitalize="none" spellcheck="false" required>
+        </label>
+        <label for="signin-pass">
+          Password
+          <input id="signin-pass" name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <button class="btn-primary" type="submit" id="signin-submit">Sign in</button>
+      </form>
+
+      <!-- ---------- create account ---------- -->
+      <form class="form" id="form-register" role="tabpanel" aria-labelledby="tab-register" hidden>
+        <label for="reg-email">
+          Email
+          <input id="reg-email" name="email" type="email" autocomplete="email"
+                 autocapitalize="none" spellcheck="false" required>
+        </label>
+        <label for="reg-pass">
+          Password
+          <input id="reg-pass" name="new-password" type="password" autocomplete="new-password" required>
+          <span class="hint">at least 6 characters</span>
+        </label>
+        <label for="reg-confirm">
+          Confirm password
+          <input id="reg-confirm" name="confirm-password" type="password" autocomplete="new-password" required>
+        </label>
+        <button class="btn-primary" type="submit" id="reg-submit">Create account</button>
+      </form>
     </div>
 
-    <div class="err" id="error" hidden></div>
-
-    <!-- ---------- sign in ---------- -->
-    <form class="form" id="form-signin" role="tabpanel" aria-labelledby="tab-signin">
-      <label for="signin-user">
-        Username
-        <input id="signin-user" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
-      </label>
-      <label for="signin-pass">
-        Password
-        <input id="signin-pass" name="password" type="password" autocomplete="current-password" required>
-      </label>
-      <label class="remember" for="signin-remember">
-        <input id="signin-remember" type="checkbox" checked>
-        Keep me signed in on this browser
-      </label>
-      <button class="btn-primary" type="submit" id="signin-submit">Sign in</button>
-    </form>
-
-    <!-- ---------- register ---------- -->
-    <form class="form" id="form-register" role="tabpanel" aria-labelledby="tab-register" hidden>
-      <label for="reg-user">
-        Username
-        <input id="reg-user" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required>
-        <span class="hint">3–20 characters · letters, numbers . - _</span>
-      </label>
-      <label for="reg-pass">
-        Password
-        <input id="reg-pass" name="new-password" type="password" autocomplete="new-password" required>
-        <span class="hint">at least 8 characters</span>
-      </label>
-      <label for="reg-confirm">
-        Confirm password
-        <input id="reg-confirm" name="confirm-password" type="password" autocomplete="new-password" required>
-      </label>
-      <button class="btn-primary" type="submit" id="reg-submit">Create account</button>
-    </form>
-
-    <p class="demo-note">
-      <strong>Demo accounts.</strong> These are stored in this browser only — there is no
-      server checking them, anyone can read them with developer tools, and they will not
-      work on another device. Please don't reuse a password you use anywhere real.
-    </p>
+    <!-- Shown after signing up when the project asks for email confirmation. -->
+    <div id="confirm-step" hidden>
+      <div class="confirm-box">
+        <h2>Confirm your email</h2>
+        <p>We sent a confirmation link to <strong id="confirm-email"></strong>. Open it, then come back and sign in.</p>
+      </div>
+      <button class="btn-secondary" type="button" id="back-to-signin">Back to sign in</button>
+    </div>
   </div>
 </main>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-config.js"></script>
 <script src="auth.js"></script>
 <script>
 (function () {
   "use strict";
 
-  // Already signed in? Go straight to the list.
-  if (Auth.currentUser()) { window.location.replace("index.html"); return; }
+  var panel     = document.getElementById("panel");
+  var errorBox  = document.getElementById("error");
+  var sub       = document.getElementById("sub");
+  var warnBox   = document.getElementById("setup-warn");
+  var confirmed = document.getElementById("confirm-step");
 
   var tabs = {
     signin:   { tab: document.getElementById("tab-signin"),   form: document.getElementById("form-signin") },
     register: { tab: document.getElementById("tab-register"), form: document.getElementById("form-register") }
   };
-  var errorBox = document.getElementById("error");
-  var sub = document.getElementById("sub");
 
-  function showError(msg){
-    errorBox.textContent = msg;
-    errorBox.hidden = false;
+  /* Nothing here works until supabase-config.js is filled in — say so
+     plainly rather than letting every button fail one at a time. */
+  var problem = Auth.setupProblem();
+  if (problem){
+    warnBox.textContent = problem;
+    warnBox.hidden = false;
+    panel.hidden = true;
+    return;
   }
+
+  // Already signed in? Go straight to the list.
+  Auth.session().then(function (s){
+    if (s) window.location.replace("index.html");
+  });
+
+  function showError(msg){ errorBox.textContent = msg; errorBox.hidden = false; }
   function clearError(){ errorBox.hidden = true; }
 
   function select(which){
     Object.keys(tabs).forEach(function (name){
-      var t = tabs[name];
-      var on = name === which;
+      var t = tabs[name], on = name === which;
       t.tab.setAttribute("aria-selected", String(on));
       t.form.hidden = !on;
     });
     sub.textContent = which === "signin"
       ? "Sign in to pick up your list."
-      : "Pick a username and a password to start your own list.";
+      : "Create an account and your list follows you to any device.";
     clearError();
     var first = tabs[which].form.querySelector("input");
     if (first) first.focus();
@@ -106,58 +125,69 @@
   tabs.signin.tab.addEventListener("click", function (){ select("signin"); });
   tabs.register.tab.addEventListener("click", function (){ select("register"); });
 
-  // With no accounts yet, creating one is the only thing that can work.
-  if (Auth.accountCount() === 0) select("register");
+  document.getElementById("back-to-signin").addEventListener("click", function (){
+    confirmed.hidden = true;
+    panel.hidden = false;
+    select("signin");
+  });
 
-  function busy(button, on, labelWhenBusy, labelWhenDone){
+  function busy(button, on, whileBusy, whenDone){
     button.disabled = on;
-    button.textContent = on ? labelWhenBusy : labelWhenDone;
+    button.textContent = on ? whileBusy : whenDone;
   }
 
+  /* ---------------- sign in ---------------- */
   tabs.signin.form.addEventListener("submit", function (e){
     e.preventDefault();
     clearError();
     var btn = document.getElementById("signin-submit");
     busy(btn, true, "Signing in…", "Sign in");
 
-    Auth.login(
-      document.getElementById("signin-user").value,
-      document.getElementById("signin-pass").value,
-      document.getElementById("signin-remember").checked
+    Auth.signIn(
+      document.getElementById("signin-email").value,
+      document.getElementById("signin-pass").value
     ).then(function (res){
       if (res.ok) { window.location.replace("index.html"); return; }
       busy(btn, false, "Signing in…", "Sign in");
       showError(res.error);
-      document.getElementById("signin-pass").focus();
-      document.getElementById("signin-pass").select();
+      var pass = document.getElementById("signin-pass");
+      pass.focus();
+      pass.select();
     });
   });
 
+  /* ---------------- create account ---------------- */
   tabs.register.form.addEventListener("submit", function (e){
     e.preventDefault();
     clearError();
+
+    var email   = document.getElementById("reg-email").value;
+    var pass    = document.getElementById("reg-pass").value;
+    var confirm = document.getElementById("reg-confirm").value;
+
+    if (pass !== confirm){ showError("The two passwords do not match."); return; }
+    if (pass.length < 6){ showError("Passwords need at least 6 characters."); return; }
+
     var btn = document.getElementById("reg-submit");
     busy(btn, true, "Creating…", "Create account");
 
-    var name = document.getElementById("reg-user").value;
-    var pass = document.getElementById("reg-pass").value;
-
-    Auth.register(name, pass, document.getElementById("reg-confirm").value).then(function (res){
+    Auth.signUp(email, pass).then(function (res){
       if (!res.ok){
         busy(btn, false, "Creating…", "Create account");
         showError(res.error);
         return;
       }
-      // Registering signs you straight in — no second trip through the form.
-      return Auth.login(name, pass, true).then(function (signedIn){
-        if (signedIn.ok) window.location.replace("index.html");
-        else {
-          busy(btn, false, "Creating…", "Create account");
-          showError(signedIn.error);
-        }
-      });
+      // Some projects sign you in immediately; others email a link first.
+      if (res.signedIn){ window.location.replace("index.html"); return; }
+      document.getElementById("confirm-email").textContent = String(email).trim();
+      panel.hidden = true;
+      confirmed.hidden = false;
+      sub.textContent = "One more step.";
     });
   });
+
+  // With the sign-in tab selected by default, put the cursor in it.
+  select("signin");
 })();
 </script>
 </body>

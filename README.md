@@ -1,7 +1,8 @@
 # Daylist
 
-A small to-do web app with a demo login. One folder of plain HTML, CSS and
-JavaScript — no framework, no build step, no server.
+A to-do web app with real accounts. Plain HTML, CSS and JavaScript on the
+front; [Supabase](https://supabase.com) (hosted Postgres + authentication)
+on the back. No framework, no build step.
 
 Type a task and Daylist reads the details out of the sentence:
 
@@ -15,72 +16,96 @@ Type a task and Daylist reads the details out of the sentence:
 It also understands `today`, `tonight`, `next week`, `next monday`, and
 `2026-10-02`.
 
+## Setup — do this once
+
+### 1. Create the table
+
+In Supabase: your project → **SQL Editor** → **New query** → paste all of
+`supabase-setup.sql` → **Run**.
+
+That makes the `tasks` table and, more importantly, the Row Level Security
+rules that stop one account from reading another account's tasks.
+
+### 2. Paste in your project's two public values
+
+Supabase → your project → **Settings → API**. Copy:
+
+- **Project URL** — like `https://abcdefgh.supabase.co`
+- the **public API key** — labelled `anon` `public` on older dashboards,
+  **Publishable key** on newer ones
+
+Put both into `supabase-config.js`, replacing the `PASTE_...` placeholders.
+
+> Never put the **service_role** / **secret** key in this file. That key
+> ignores every security rule, and this file is downloaded by every visitor.
+
+### 3. Decide about email confirmation
+
+By default Supabase emails a confirmation link before a new account can sign
+in. That's the right behaviour for a real product, and the app handles it —
+after signing up you'll see a "confirm your email" screen.
+
+For a live classroom demo the wait is awkward. To turn it off:
+Supabase → **Authentication → Sign In / Providers → Email** → switch off
+**Confirm email**. New signups are then signed in instantly.
+
 ## Files
 
-| File          | What it is                                                |
-| ------------- | --------------------------------------------------------- |
-| `login.html`  | Sign-in and create-account page                           |
-| `index.html`  | The task list (markup only)                               |
-| `app.js`      | All the task-list behaviour                               |
-| `auth.js`     | The demo account system                                   |
-| `styles.css`  | Design tokens and every style, shared by both pages       |
-| `favicon.svg` | The icon in the browser tab                               |
-| `vercel.json` | Optional Vercel settings (tidier URLs)                    |
-| `.gitignore`  | Files Git should ignore                                   |
+| File                 | What it is                                            |
+| -------------------- | ----------------------------------------------------- |
+| `login.html`         | Sign-in and create-account page                       |
+| `index.html`         | The task list (markup only)                           |
+| `app.js`             | Task-list behaviour, reads and writes the database    |
+| `auth.js`            | Wraps Supabase Auth: sign up, sign in, sign out       |
+| `supabase-config.js` | **You fill this in** — your project URL and public key |
+| `supabase-setup.sql` | Run once in Supabase's SQL editor                     |
+| `styles.css`         | Design tokens and every style, shared by both pages   |
+| `favicon.svg`        | The icon in the browser tab                           |
+| `vercel.json`        | Optional Vercel settings                              |
 
-## Run it on your own computer
+## Running it locally
 
-Double-click `index.html`. It opens in your browser and works. With no account
-yet, it sends you to `login.html` to make one.
+This version needs a real web server — opening `index.html` by double-clicking
+uses the `file://` protocol, which browsers block from making the network
+requests Supabase needs. Any static server works, for example:
 
-## Publish it on Vercel
+    npx serve .
 
-### Option A — the Vercel CLI (fastest)
+Then open the address it prints.
 
-1. Install [Node.js](https://nodejs.org) if you don't have it.
-2. Install the Vercel command-line tool: `npm install -g vercel`
-3. In a terminal, move into this folder and run `vercel`.
-   Accept the defaults; leave build command and output directory blank —
-   this is a plain static site.
-4. `vercel --prod` publishes the real URL.
+## Publishing on Vercel
 
-Already deployed once? Just run `vercel --prod` again from this folder and
-Vercel replaces the live version with whatever is in it now.
+Nothing special: it is still a static site with no build step. Push to your
+GitHub repo and Vercel redeploys, or run `vercel --prod` from this folder.
 
-### Option B — GitHub, then import into Vercel
+`supabase-config.js` is committed on purpose — the values in it are meant to
+be public. What protects the data is the Row Level Security rules, not the
+secrecy of that key.
 
-1. Put these files in a GitHub repository.
-2. At vercel.com, add a new project and pick that repository.
-3. Framework preset: **Other**. Leave build command and output directory empty.
-4. Deploy. Every later `git push` redeploys automatically.
+## How the security actually works
 
-## How the login actually works — read this before you present it
+This is worth being able to explain, because it is the whole point of the
+assignment.
 
-`auth.js` fakes a login system **entirely inside the visitor's browser**. There
-is no server, which means:
+**Authentication** — signing up creates a row in Supabase's `auth.users` table
+on their servers. The password is hashed there; this app never sees the hash
+and never stores the password. Signing in returns a short-lived access token
+that the browser sends with every later request.
 
-- Anyone can open developer tools and read every stored account.
-- Anyone can edit those accounts, or delete the check that redirects to the
-  login page, and walk straight in.
-- An account does not exist on any other browser, device, or for any other
-  visitor.
+**Authorisation** — the public API key alone grants nothing. Every query is
+filtered *inside Postgres* by the policies in `supabase-setup.sql`:
 
-Passwords are salted and hashed with SHA-256 before being stored, so the raw
-text is not lying around in plain sight. That is good hygiene, **not** security:
-without a server the check itself can simply be bypassed.
+    using (auth.uid() = user_id)
 
-So: perfectly fine as a classroom demonstration of what a login *flow* looks
-like, and a good thing to be able to explain. Never a way to protect anything
-real. Real authentication has to run on a server the visitor cannot edit — that
-is the job of a backend, or a hosted service like Supabase, Clerk or Auth0.
+`auth.uid()` is the account id carried by the request's token. So "give me all
+tasks" silently returns only your own rows, and an attempt to write a row
+belonging to someone else is rejected by the database.
 
-## Where the tasks are stored
+That is the real difference from a browser-only login. Deleting JavaScript in
+developer tools gets an attacker nowhere, because the rule is enforced
+somewhere they cannot reach.
 
-In `localStorage`, a small storage box every browser gives each website, keyed
-to that site's address. Each account gets its own key, so two accounts on the
-same computer keep separate lists.
-
-Tasks survive closing the tab and restarting the computer. They do **not**
-follow you to another browser, another laptop, or your phone. That is the
-honest trade for a site with no database — and the exact point where you would
-add one.
+**What is still missing for a production app**: email address verification is
+optional above, there is no password-strength policy beyond Supabase's
+six-character minimum, no rate limiting beyond Supabase's defaults, and no
+account-deletion flow. Worth naming if anyone asks what you would do next.

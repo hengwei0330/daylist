@@ -1,16 +1,18 @@
 /* =========================================================
-   Daylist — the task list itself
-   Runs only for a signed-in visitor; auth.js handles that.
+   Daylist — the task list
+
+   Tasks live in a Postgres table in your Supabase project, one row
+   per task, each stamped with the account that owns it. The browser
+   never decides who may read what: every request carries the signed-in
+   account's token, and the Row Level Security rules in
+   supabase-setup.sql filter the rows inside the database.
    ========================================================= */
 (function () {
   "use strict";
 
-  /* No session? auth.js sends the visitor to login.html and we stop here. */
-  var USER = Auth.requireUser();
-  if (!USER) return;
-
-  /* Each account keeps its own list, under its own storage key. */
-  var LS_KEY = Auth.tasksKey(USER);
+  var db = null;          // the Supabase client
+  var USER_ID = null;
+  var USER_EMAIL = "";
 
   /* ---------------- dates ---------------- */
   var WD = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
@@ -94,43 +96,87 @@
     return { text: text, due: due, priority: priority, list: list };
   }
 
-  /* ---------------- state ---------------- */
-  var STARTER = [
-    { text: "Type a weekday, a #list or ! straight into the box — Daylist reads them", due: addDays(0), priority: 1, list: "daylist" },
-    { text: "Click a task to rename it", due: null, priority: 0, list: "daylist" },
-    { text: "Check one off and watch it drop into Done", due: addDays(1), priority: 0, list: "daylist" }
-  ];
-
-  var Store = { items: [] };
-  var editingId = null, storageWarned = false;
-  var filter = "open", activeList = null;
-
-  function uid(){ return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8); }
-
-  function loadLocal(){
-    try {
-      var raw = localStorage.getItem(LS_KEY);
-      if (raw !== null) { var v = JSON.parse(raw); if (Array.isArray(v)) return v; }
-    } catch (e) {}
-    return null;
+  /* ---------------- rows in, rows out ----------------
+     Postgres columns are snake_case and timestamps are strings;
+     the rest of this file works in camelCase and numbers. */
+  function fromRow(r){
+    return {
+      id: r.id,
+      text: r.text,
+      done: !!r.done,
+      due: r.due || null,
+      priority: r.priority || 0,
+      list: r.list || null,
+      createdAt: r.created_at ? Date.parse(r.created_at) : 0,
+      completedAt: r.completed_at ? Date.parse(r.completed_at) : null
+    };
   }
 
-  function saveLocal(){
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify(Store.items));
-    } catch (e) {
-      if (!storageWarned){
-        storageWarned = true;
-        showNotice("This browser is blocking storage, so tasks will disappear when you close the tab.");
-      }
-    }
+  function patchToRow(p){
+    var row = {};
+    if ("text" in p)     row.text = p.text;
+    if ("done" in p)     row.done = p.done;
+    if ("due" in p)      row.due = p.due;
+    if ("priority" in p) row.priority = p.priority;
+    if ("list" in p)     row.list = p.list;
+    if ("completedAt" in p) row.completed_at = p.completedAt ? new Date(p.completedAt).toISOString() : null;
+    return row;
+  }
+
+  function newId(){
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    // Fallback for older browsers: a random RFC-4122-shaped id.
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c){
+      var r = Math.random() * 16 | 0;
+      return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  /* ---------------- state ---------------- */
+  var Store = { items: [] };
+  var editingId = null;
+  var filter = "open", activeList = null;
+
+  function showNotice(msg){
+    var n = document.getElementById("notice");
+    n.textContent = msg;
+    n.hidden = false;
+  }
+  function clearNotice(){ document.getElementById("notice").hidden = true; }
+
+  /* A write failed. Say so, and pull the real state back from the
+     database rather than leaving the screen showing a lie. */
+  function writeFailed(error){
+    showNotice(Auth.friendly(error) + " Your last change was not saved.");
+    return refresh();
+  }
+
+  function refresh(){
+    return db.from("tasks").select("*").order("created_at", { ascending: true })
+      .then(function (res){
+        if (res.error) { showNotice(Auth.friendly(res.error)); return; }
+        Store.items = (res.data || []).map(fromRow);
+        draw();
+      });
   }
 
   function addTask(fields){
-    var item = Object.assign({ id: uid(), done: false, createdAt: Date.now(), completedAt: null }, fields);
-    Store.items = Store.items.concat(item);
-    saveLocal();
+    var item = Object.assign({ id: newId(), done: false, createdAt: Date.now(), completedAt: null }, fields);
+    Store.items = Store.items.concat(item);   // show it at once
+    clearNotice();
     render();
+
+    db.from("tasks").insert({
+      id: item.id,
+      user_id: USER_ID,
+      text: item.text,
+      done: false,
+      due: item.due || null,
+      priority: item.priority || 0,
+      list: item.list || null
+    }).then(function (res){
+      if (res.error) writeFailed(res.error);
+    });
   }
 
   function patchTask(id, patch){
@@ -139,26 +185,32 @@
     if (i < 0) return;
     Store.items = Store.items.slice();
     Store.items[i] = Object.assign({}, Store.items[i], patch);
-    saveLocal();
+    clearNotice();
     render();
+
+    db.from("tasks").update(patchToRow(patch)).eq("id", id).then(function (res){
+      if (res.error) writeFailed(res.error);
+    });
   }
 
   function removeTask(id){
-    Store.items = Store.items.filter(function(t){ return t.id !== id; });
-    saveLocal();
+    Store.items = Store.items.filter(function (t){ return t.id !== id; });
+    clearNotice();
     render();
+
+    db.from("tasks").delete().eq("id", id).then(function (res){
+      if (res.error) writeFailed(res.error);
+    });
   }
 
   function clearDone(){
-    Store.items = Store.items.filter(function(t){ return !t.done; });
-    saveLocal();
+    Store.items = Store.items.filter(function (t){ return !t.done; });
+    clearNotice();
     render();
-  }
 
-  function showNotice(msg){
-    var n = document.getElementById("notice");
-    n.textContent = msg;
-    n.hidden = false;
+    db.from("tasks").delete().eq("user_id", USER_ID).eq("done", true).then(function (res){
+      if (res.error) writeFailed(res.error);
+    });
   }
 
   /* ---------------- grouping ---------------- */
@@ -319,85 +371,94 @@
   }
 
   /* ---------------- interaction ---------------- */
-  var input = document.getElementById("task-input");
-  var addBtn = document.getElementById("add-btn");
+  function wireUp(){
+    var input = document.getElementById("task-input");
+    var addBtn = document.getElementById("add-btn");
 
-  document.getElementById("who").textContent = USER;
-  document.getElementById("today-date").textContent =
-    new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+    document.getElementById("who").textContent = USER_EMAIL;
+    document.getElementById("today-date").textContent =
+      new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
 
-  document.getElementById("signout").addEventListener("click", function (){
-    Auth.logout();
-    window.location.replace("login.html");
-  });
+    document.getElementById("signout").addEventListener("click", function (){
+      Auth.signOut().then(function (){ window.location.replace("login.html"); });
+    });
 
-  input.addEventListener("input", function (){ addBtn.disabled = !input.value.trim(); });
+    input.addEventListener("input", function (){ addBtn.disabled = !input.value.trim(); });
 
-  document.getElementById("compose-form").addEventListener("submit", function (e){
-    e.preventDefault();
-    var raw = input.value.trim();
-    if (!raw) return;
-    var f = parseInput(raw);
-    if (!f.list && activeList) f.list = activeList;
-    addTask(f);
-    input.value = "";
-    addBtn.disabled = true;
-    input.focus();
-  });
+    document.getElementById("compose-form").addEventListener("submit", function (e){
+      e.preventDefault();
+      var raw = input.value.trim();
+      if (!raw) return;
+      var f = parseInput(raw);
+      if (!f.list && activeList) f.list = activeList;
+      addTask(f);
+      input.value = "";
+      addBtn.disabled = true;
+      input.focus();
+    });
 
-  document.getElementById("syntax").addEventListener("click", function (e){
-    var b = e.target.closest(".tok");
-    if (!b) return;
-    var v = input.value.replace(/\s+$/, "");
-    input.value = (v ? v + " " : "") + b.getAttribute("data-tok") + " ";
-    addBtn.disabled = !input.value.trim();
-    input.focus();
-  });
+    document.getElementById("syntax").addEventListener("click", function (e){
+      var b = e.target.closest(".tok");
+      if (!b) return;
+      var v = input.value.replace(/\s+$/, "");
+      input.value = (v ? v + " " : "") + b.getAttribute("data-tok") + " ";
+      addBtn.disabled = !input.value.trim();
+      input.focus();
+    });
 
-  document.getElementById("filters").addEventListener("click", function (e){
-    var b = e.target.closest(".chip");
-    if (!b) return;
-    if (b.hasAttribute("data-filter")) filter = b.getAttribute("data-filter");
-    else {
-      var l = b.getAttribute("data-list");
-      activeList = activeList === l ? null : l;
-    }
-    draw();
-  });
+    document.getElementById("filters").addEventListener("click", function (e){
+      var b = e.target.closest(".chip");
+      if (!b) return;
+      if (b.hasAttribute("data-filter")) filter = b.getAttribute("data-filter");
+      else {
+        var l = b.getAttribute("data-list");
+        activeList = activeList === l ? null : l;
+      }
+      draw();
+    });
 
-  var groups = document.getElementById("groups");
+    var groups = document.getElementById("groups");
 
-  groups.addEventListener("change", function (e){
-    var box = e.target.closest(".check");
-    if (!box) return;
-    var li = box.closest(".task");
-    patchTask(li.getAttribute("data-id"), { done: box.checked, completedAt: box.checked ? Date.now() : null });
-  });
+    groups.addEventListener("change", function (e){
+      var box = e.target.closest(".check");
+      if (!box) return;
+      var li = box.closest(".task");
+      patchTask(li.getAttribute("data-id"), { done: box.checked, completedAt: box.checked ? Date.now() : null });
+    });
 
-  groups.addEventListener("click", function (e){
-    var clear = e.target.closest('[data-act="clear"]');
-    if (clear){
-      if (clear.getAttribute("data-armed") === "1"){ clearDone(); return; }
-      clear.setAttribute("data-armed", "1");
-      clear.textContent = "Delete them? Click again";
-      setTimeout(function (){
-        if (!clear.isConnected) return;
-        clear.removeAttribute("data-armed");
-        clear.textContent = "Clear completed";
-      }, 3500);
-      return;
-    }
-    var del = e.target.closest('[data-act="del"]');
-    if (del){ removeTask(del.closest(".task").getAttribute("data-id")); return; }
-    var title = e.target.closest('[data-act="edit"]');
-    if (title) beginEdit(title);
-  });
+    groups.addEventListener("click", function (e){
+      var clear = e.target.closest('[data-act="clear"]');
+      if (clear){
+        if (clear.getAttribute("data-armed") === "1"){ clearDone(); return; }
+        clear.setAttribute("data-armed", "1");
+        clear.textContent = "Delete them? Click again";
+        setTimeout(function (){
+          if (!clear.isConnected) return;
+          clear.removeAttribute("data-armed");
+          clear.textContent = "Clear completed";
+        }, 3500);
+        return;
+      }
+      var del = e.target.closest('[data-act="del"]');
+      if (del){ removeTask(del.closest(".task").getAttribute("data-id")); return; }
+      var title = e.target.closest('[data-act="edit"]');
+      if (title) beginEdit(title);
+    });
 
-  groups.addEventListener("keydown", function (e){
-    if (e.key !== "Enter" && e.key !== " ") return;
-    var title = e.target.closest('[data-act="edit"]');
-    if (title){ e.preventDefault(); beginEdit(title); }
-  });
+    groups.addEventListener("keydown", function (e){
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var title = e.target.closest('[data-act="edit"]');
+      if (title){ e.preventDefault(); beginEdit(title); }
+    });
+
+    document.addEventListener("keydown", function (e){
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      var t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      e.preventDefault();
+      input.focus();
+    });
+  }
 
   function beginEdit(titleEl){
     var li = titleEl.closest(".task");
@@ -430,18 +491,28 @@
     field.addEventListener("blur", function (){ finish(true); });
   }
 
-  document.addEventListener("keydown", function (e){
-    if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
-    var t = e.target;
-    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-    e.preventDefault();
-    input.focus();
-  });
-
   /* ---------------- start ---------------- */
-  var saved = loadLocal();
-  Store.items = saved ? saved : STARTER.map(function (s, i){
-    return Object.assign({ id: "starter-" + i, done: false, createdAt: Date.now() + i, completedAt: null }, s);
+  function bootError(msg){
+    var boot = document.getElementById("boot");
+    boot.innerHTML = '<div class="boot-msg"><h1>Daylist needs a moment of setup</h1><p></p></div>';
+    boot.querySelector("p").textContent = msg;
+  }
+
+  var problem = Auth.setupProblem();
+  if (problem){ bootError(problem); return; }
+
+  Auth.requireSession().then(function (s){
+    if (!s) return;                 // redirecting to the login page
+    USER_ID = s.user.id;
+    USER_EMAIL = Auth.emailOf(s);
+    db = Auth.client();
+
+    document.getElementById("boot").hidden = true;
+    document.getElementById("wrap").hidden = false;
+
+    wireUp();
+    return refresh();
+  }).catch(function (e){
+    bootError(Auth.friendly(e));
   });
-  draw();
 })();

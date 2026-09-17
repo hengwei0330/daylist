@@ -83,9 +83,6 @@ button,input{font:inherit;color:inherit}
 }
 .form input[type="text"]:focus, .form input[type="password"]:focus{outline:none; border-color:var(--accent)}
 .form .hint{font-family:var(--mono); font-size:11px; color:var(--ink-3); font-weight:400}
-.remember{flex-direction:row !important; align-items:center; gap:8px; font-weight:400 !important; color:var(--ink-2)}
-.remember input{width:15px; height:15px; accent-color:var(--accent); margin:0}
-
 .btn-primary{
   width:100%; border:0; background:var(--accent); color:var(--accent-ink);
   font-weight:600; font-size:15px; padding:11px; border-radius:8px; cursor:pointer;
@@ -94,12 +91,42 @@ button,input{font:inherit;color:inherit}
 .btn-primary:hover{filter:brightness(1.08)}
 .btn-primary:disabled{opacity:.5; cursor:default; filter:none}
 
-.err{background:var(--crit-soft); color:var(--crit); border-radius:8px; padding:9px 12px; font-size:13px}
-.demo-note{
-  margin-top:18px; border:1px solid var(--warn); background:var(--warn-soft); color:var(--warn);
-  border-radius:8px; padding:10px 12px; font-size:12.5px; line-height:1.45;
+.btn-secondary{
+  width:100%; margin-top:12px;
+  border:1px solid var(--line-2); background:transparent; color:var(--ink-2);
+  font-size:14px; padding:10px; border-radius:8px; cursor:pointer;
+  transition:color .15s ease, border-color .15s ease;
 }
-.demo-note strong{font-weight:600}
+.btn-secondary:hover{color:var(--ink); border-color:var(--ink-3)}
+
+.err{background:var(--crit-soft); color:var(--crit); border-radius:8px; padding:9px 12px; font-size:13px; margin-top:16px}
+
+/* Shown when supabase-config.js still holds its placeholders. */
+.setup-warn{
+  margin-top:18px; border:1px solid var(--warn); background:var(--warn-soft); color:var(--warn);
+  border-radius:8px; padding:11px 13px; font-size:13px; line-height:1.5;
+}
+
+/* "We emailed you a link" step after signing up. */
+.confirm-box{
+  margin-top:18px; border:1px solid var(--accent); background:var(--accent-soft);
+  border-radius:10px; padding:16px 16px 14px;
+}
+.confirm-box h2{
+  font-family:var(--display); font-weight:700; font-size:16px; margin:0 0 6px;
+  color:var(--accent); letter-spacing:-.01em;
+}
+.confirm-box p{margin:0; font-size:13.5px; color:var(--ink); line-height:1.5}
+.confirm-box strong{font-weight:600; overflow-wrap:anywhere}
+
+/* ---------- boot screen on the task page ---------- */
+.boot{
+  min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:40px 20px; text-align:center;
+}
+.boot-msg{max-width:46ch}
+.boot-msg h1{font-family:var(--display); font-weight:700; font-size:20px; margin:0 0 8px; letter-spacing:-.01em}
+.boot-msg p{margin:10px 0 0; color:var(--ink-2); font-size:14px; line-height:1.55}
 
 /* =========================================================
    Task app page
