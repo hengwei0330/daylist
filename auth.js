@@ -79,6 +79,10 @@ window.Auth = (function () {
       return "That does not look like a valid email address.";
     if (/rate limit|too many requests/i.test(m))
       return "Too many attempts just now. Wait a minute and try again.";
+    // Supabase throttles repeat signup/reset emails to the same address.
+    if (/only request this after (\d+) seconds?/i.test(m))
+      return "That was just sent. Wait " + m.match(/after (\d+) seconds?/i)[1] +
+             " seconds before trying again — and check your inbox meanwhile.";
     if (/failed to fetch|network/i.test(m))
       return "Could not reach Supabase. Check your internet connection and the Project URL.";
 
