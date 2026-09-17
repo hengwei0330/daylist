@@ -1,0 +1,7 @@
+.vercel
+.DS_Store
+node_modules
+
+# Older copies kept on disk for reference, not part of the deployed site
+daylist-site/
+daylist.html

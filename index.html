@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Daylist</title>
+<meta name="description" content="A to-do app that reads due dates, lists and priority straight out of what you type.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@700;800&family=JetBrains+Mono:wght@400;500&family=Public+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="top-in">
+      <span class="brand">Daylist<span class="dot">.</span></span>
+      <span class="date" id="today-date"></span>
+      <span class="top-right">
+        <span class="meter">
+          <span class="meter-bar"><span class="meter-fill" id="meter-fill"></span></span>
+          <span class="meter-txt" id="meter-txt">0/0</span>
+        </span>
+        <span class="account">
+          <span class="who" id="who"></span>
+          <button class="signout" type="button" id="signout">Sign out</button>
+        </span>
+      </span>
+    </div>
+  </header>
+
+  <div class="compose">
+    <form class="field" id="compose-form">
+      <input id="task-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Add a task — try “call the dentist friday !!”" aria-label="New task">
+      <button class="add" id="add-btn" type="submit" disabled>Add</button>
+    </form>
+    <div class="syntax" id="syntax">
+      <span class="lead">Shorthand</span>
+      <button class="tok" type="button" data-tok="today">today</button>
+      <button class="tok" type="button" data-tok="tomorrow">tomorrow</button>
+      <button class="tok" type="button" data-tok="friday">friday</button>
+      <button class="tok" type="button" data-tok="in 3 days">in 3 days</button>
+      <button class="tok" type="button" data-tok="#home">#list</button>
+      <button class="tok" type="button" data-tok="!!">!!</button>
+    </div>
+  </div>
+
+  <div class="filters" id="filters"></div>
+  <div class="notice" id="notice" hidden></div>
+
+  <div class="groups" id="groups"></div>
+
+  <footer>
+    <span class="status"><span class="led"></span><span>Saved in this browser</span></span>
+    <span><kbd>/</kbd> to add · <kbd>Enter</kbd> to save · click a task to rename</span>
+  </footer>
+</div>
+
+<script src="auth.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
