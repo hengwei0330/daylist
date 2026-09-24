@@ -498,10 +498,20 @@
     boot.querySelector("p").textContent = msg;
   }
 
+  /* On a slow connection the Supabase library can take a while to arrive.
+     Say so rather than sitting on "Checking your session…" indefinitely. */
+  var settled = false;
+  setTimeout(function (){
+    if (settled) return;
+    var p = document.querySelector("#boot p");
+    if (p) p.textContent = "Still connecting… if this does not clear, check your internet connection and reload.";
+  }, 8000);
+
   var problem = Auth.setupProblem();
-  if (problem){ bootError(problem); return; }
+  if (problem){ settled = true; bootError(problem); return; }
 
   Auth.requireSession().then(function (s){
+    settled = true;
     if (!s) return;                 // redirecting to the login page
     USER_ID = s.user.id;
     USER_EMAIL = Auth.emailOf(s);
@@ -513,6 +523,7 @@
     wireUp();
     return refresh();
   }).catch(function (e){
+    settled = true;
     bootError(Auth.friendly(e));
   });
 })();

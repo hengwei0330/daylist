@@ -5,3 +5,9 @@ node_modules
 # Older copies kept on disk for reference, not part of the deployed site
 daylist-site/
 daylist.html
+
+.vercel
+.env*
+
+# Expo scaffold, not part of the Daylist site
+my-app/
