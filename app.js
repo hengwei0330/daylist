@@ -397,6 +397,64 @@
       input.focus();
     });
 
+    /* ----- "or just describe it": ask the assistant, then add what it returns -----
+       The browser never sees the Groq key. It calls our own /api/create-task,
+       which runs on Vercel's servers and holds the key there. */
+    var smartForm = document.getElementById("smart-form");
+    var smartInput = document.getElementById("smart-input");
+    var smartBtn = document.getElementById("smart-btn");
+    var smartStatus = document.getElementById("smart-status");
+
+    function setSmartStatus(kind, message, busy){
+      if (!kind){ smartStatus.hidden = true; smartStatus.textContent = ""; return; }
+      smartStatus.hidden = false;
+      smartStatus.setAttribute("data-kind", kind);
+      smartStatus.innerHTML = busy ? '<span class="spin"></span>' : "";
+      smartStatus.appendChild(document.createTextNode(message));
+    }
+
+    smartInput.addEventListener("input", function (){
+      smartBtn.disabled = !smartInput.value.trim();
+    });
+
+    smartForm.addEventListener("submit", function (e){
+      e.preventDefault();
+      var wanted = smartInput.value.trim();
+      if (!wanted) return;
+
+      smartBtn.disabled = true;
+      smartBtn.textContent = "Thinking…";
+      setSmartStatus("busy", "Working out what you need…", true);
+
+      Auth.session().then(function (s){
+        var token = s && s.access_token;
+        if (!token) throw new Error("Sign in first.");
+        return fetch("/api/create-task", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+          body: JSON.stringify({ text: wanted, today: todayKey() })
+        });
+      }).then(function (r){
+        return r.json().then(function (data){
+          if (!r.ok) throw new Error(data && data.error ? data.error : "The assistant could not answer.");
+          return data;
+        });
+      }).then(function (data){
+        var made = data.tasks || [];
+        made.forEach(function (t){
+          addTask({ text: t.text, due: t.due || null, priority: t.priority || 0, list: t.list || null });
+        });
+        smartInput.value = "";
+        setSmartStatus("done", made.length === 1 ? "Added 1 task." : "Added " + made.length + " tasks.", false);
+        setTimeout(function (){ setSmartStatus(null); }, 4000);
+      }).catch(function (err){
+        setSmartStatus("error", err && err.message ? err.message : "Something went wrong.", false);
+      }).then(function (){
+        smartBtn.textContent = "Create";
+        smartBtn.disabled = !smartInput.value.trim();
+      });
+    });
+
     document.getElementById("syntax").addEventListener("click", function (e){
       var b = e.target.closest(".tok");
       if (!b) return;

@@ -53,6 +53,20 @@
       <button class="tok" type="button" data-tok="#home">#list</button>
       <button class="tok" type="button" data-tok="!!">!!</button>
     </div>
+
+    <div class="smart">
+      <div class="smart-head">
+        <span class="smart-label">Or just describe it</span>
+        <span class="smart-note">the assistant works out the dates and lists</span>
+      </div>
+      <form class="field smart-field" id="smart-form">
+        <input id="smart-input" type="text" autocomplete="off"
+               placeholder="“sort out mum's birthday next month”"
+               aria-label="Describe a task for the assistant">
+        <button class="add" id="smart-btn" type="submit" disabled>Create</button>
+      </form>
+      <div class="smart-status" id="smart-status" hidden></div>
+    </div>
   </div>
 
   <div class="filters" id="filters"></div>
